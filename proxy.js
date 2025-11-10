@@ -1,5 +1,3 @@
-import { createServerClient } from "@supabase/ssr"
-import { NextResponse } from "next/server"
 import { authMiddleware } from "./lib/supabase/middleware";
 
 export async function proxy(req) {
