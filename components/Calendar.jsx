@@ -1,14 +1,21 @@
 "use client";
+import {
+  addOrUpdateCycleAction,
+  getCyclesAction,
+  getPredictedCyclesAction,
+} from "@/lib/actions/cycles";
+import { formatDate } from "@/lib/utils";
 import { useState, useEffect } from "react";
 
 export default function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [symptoms, setSymptoms] = useState(["Cramps"]);
-  const [mood, setMood] = useState("Sad");
-  const [flow, setFlow] = useState("Medium");
+  const [symptoms, setSymptoms] = useState([]);
+  const [mood, setMood] = useState("");
+  const [flow, setFlow] = useState(0);
   const [notes, setNotes] = useState("");
   const [cycleData, setCycleData] = useState({});
+  const [predictionData, setPredictionData] = useState({});
   const [isLoading, setIsLoading] = useState(true);
 
   const symptomOptions = [
@@ -25,89 +32,114 @@ export default function Calendar() {
     { id: "energetic", label: "Energetic", emoji: "⚡" },
   ];
 
-  const flowOptions = ["Light", "Medium", "Heavy"];
+  const flowOptions = [
+    { label: "None", value: 0 },
+    { label: "Light", value: 1 },
+    { label: "Medium", value: 2 },
+    { label: "Heavy", value: 3 },
+  ];
+
+  // Fungsi untuk mengambil data cycles dari Supabase
+  const fetchCycles = async () => {
+    setIsLoading(true);
+
+    const result = await getCyclesAction();
+    if (result.errors) {
+      console.error("Error loading cycles:", result.errors);
+    } else {
+      const formattedData = {};
+      result.cycles.forEach((cycle) => {
+        formattedData[cycle.date] = {
+          symptoms: cycle.symptoms,
+          mood: cycle.mood,
+          flow: cycle.flow,
+          notes: cycle.notes,
+        };
+      });
+      setCycleData(formattedData);
+    }
+
+    const predictionResult = await getPredictedCyclesAction();
+    if (predictionResult.errors) {
+      console.error("Error loading predictions:", predictionResult.errors);
+    } else {
+      setPredictionData(predictionResult.predictions);
+    }
+
+    setIsLoading(false);
+  };
+
+  // Fungsi untuk menyimpan log ke Supabase
+  const saveLog = async () => {
+    const dateKey = formatDate(selectedDate);
+
+    const formCycleData = new FormData();
+    formCycleData.append("date", dateKey);
+    formCycleData.append("flow", flow);
+    formCycleData.append("mood", mood);
+    symptoms.forEach((symptom) => formCycleData.append("symptoms", symptom));
+    formCycleData.append("notes", notes);
+
+    const result = await addOrUpdateCycleAction(formCycleData);
+
+    if (result.errors) {
+      console.error("Error saving cycle data:", result.errors);
+    }
+
+    fetchCycles();
+  };
 
   // 🔥 USE EFFECT 1: Load data dari localStorage/Supabase saat komponen mount
   useEffect(() => {
-    const loadSavedData = async () => {
-      setIsLoading(true);
-      try {
-        // Simulasi loading data
-        setTimeout(() => {
-          // Contoh data dari localStorage
-          const savedData = localStorage.getItem("cycleTrackerData");
-          if (savedData) {
-            const parsedData = JSON.parse(savedData);
-            setCycleData(parsedData);
-          }
-          setIsLoading(false);
-        }, 500);
-      } catch (error) {
-        console.error("Error loading data:", error);
-        setIsLoading(false);
-      }
+    const loadData = async () => {
+      await fetchCycles();
     };
-
-    loadSavedData();
+    loadData();
   }, []);
 
   // 🔥 USE EFFECT 2: Load log data untuk selectedDate ketika berubah
   useEffect(() => {
     const loadLogForSelectedDate = () => {
-      if (cycleData[selectedDate.toISOString().split("T")[0]]) {
-        const logData = cycleData[selectedDate.toISOString().split("T")[0]];
+      if (cycleData[formatDate(selectedDate)]) {
+        const logData = cycleData[formatDate(selectedDate)];
         setSymptoms(logData.symptoms || []);
-        setMood(logData.mood || "Sad");
-        setFlow(logData.flow || "Medium");
+        setMood(logData.mood || "");
+        setFlow(logData.flow || 0);
         setNotes(logData.notes || "");
       } else {
         // Reset ke default jika tidak ada data
-        setSymptoms(["Cramps"]);
-        setMood("Sad");
-        setFlow("Medium");
+        setSymptoms([]);
+        setMood("");
+        setFlow(0);
         setNotes("");
       }
     };
-
     loadLogForSelectedDate();
   }, [selectedDate, cycleData]);
 
-  // 🔥 USE EFFECT 3: Auto-save ketika data berubah (debounced)
-  useEffect(() => {
-    const saveTimeout = setTimeout(() => {
-      if (!isLoading) {
-        saveLogToStorage();
-      }
-    }, 1000);
-
-    return () => clearTimeout(saveTimeout);
-  }, [symptoms, mood, flow, notes, selectedDate]);
+  // Fungsi untuk handle update log
+  function handleUpdateLog() {
+    saveLog();
+    console.log("Log updated for:", selectedDate.toDateString(), {
+      symptoms,
+      mood,
+      flow,
+      notes,
+    });
+    alert("Log updated successfully!");
+  }
 
   // Fungsi navigasi bulan
   const prevMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+    setCurrentDate(
+      new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1)
+    );
   };
 
   const nextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
-  };
-
-  // Fungsi save ke localStorage/Supabase
-  const saveLogToStorage = () => {
-    const dateKey = selectedDate.toISOString().split("T")[0];
-    const updatedCycleData = {
-      ...cycleData,
-      [dateKey]: {
-        symptoms,
-        mood,
-        flow,
-        notes,
-        updatedAt: new Date().toISOString(),
-      },
-    };
-
-    setCycleData(updatedCycleData);
-    localStorage.setItem("cycleTrackerData", JSON.stringify(updatedCycleData));
+    setCurrentDate(
+      new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1)
+    );
   };
 
   // Fungsi generate calendar days
@@ -129,8 +161,9 @@ export default function Calendar() {
 
       const isCurrentMonth = currentDay.getMonth() === month;
       const isToday = currentDay.toDateString() === today.toDateString();
-      const isSelected = currentDay.toDateString() === selectedDate.toDateString();
-      const dateKey = currentDay.toISOString().split("T")[0];
+      const isSelected =
+        currentDay.toDateString() === selectedDate.toDateString();
+      const dateKey = formatDate(currentDay);
 
       // Cek data yang tersimpan untuk hari ini
       const hasLogData = cycleData[dateKey];
@@ -140,15 +173,36 @@ export default function Calendar() {
       let ovulation = false;
 
       // Contoh logic - bisa diganti dengan prediksi siklus yang sebenarnya
-      if (hasLogData && hasLogData.flow) {
-        type = "period";
-      } else if (isCurrentMonth && currentDay.getDate() >= 10 && currentDay.getDate() <= 16) {
-        type = "fertile";
-        if (currentDay.getDate() === 14) {
-          ovulation = true;
-        }
-      } else if (isToday) {
+      if (isToday) {
+        // Jika hari ini
         type = "today";
+      } else if (hasLogData && hasLogData.flow > 0) {
+        // Jika ada flow pada hari tersebut (data user)
+        type = "period";
+      } else if (predictionData?.predictions) {
+        // Hasil prediksi
+        for (const prediction of predictionData.predictions) {
+          // Period
+          if (
+            dateKey >= prediction.period.start &&
+            dateKey <= prediction.period.end
+          ) {
+            type = "period";
+            break;
+          }
+
+          // Fertile Window
+          if (
+            dateKey >= prediction.fertileWindow.start &&
+            dateKey <= prediction.fertileWindow.end
+          ) {
+            type = "fertile";
+            if (dateKey === prediction.ovulation) {
+              // Jika hari ovulation
+              ovulation = true;
+            }
+          }
+        }
       }
 
       days.push({
@@ -171,10 +225,6 @@ export default function Calendar() {
       return "bg-primary/20 text-primary border-2 border-primary";
     }
 
-    if (day.hasLogData) {
-      return "bg-green-100 text-green-800 border border-green-300";
-    }
-
     switch (day.type) {
       case "period":
         return "bg-period text-white";
@@ -183,7 +233,9 @@ export default function Calendar() {
       case "today":
         return "bg-primary text-white ring-2 ring-primary";
       default:
-        return day.isCurrentMonth ? "text-text-light hover:bg-gray-50" : "text-gray-300";
+        return day.isCurrentMonth
+          ? "text-text-light hover:bg-gray-50"
+          : "text-gray-300";
     }
   };
 
@@ -195,14 +247,21 @@ export default function Calendar() {
     }
   }
 
-  function handleUpdateLog() {
-    saveLogToStorage();
-    console.log("Log updated for:", selectedDate.toDateString(), { symptoms, mood, flow, notes });
-    alert("Log updated successfully!");
-  }
-
   const calendarDays = getCalendarDays();
-  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
 
   if (isLoading) {
     return (
@@ -215,7 +274,9 @@ export default function Calendar() {
   return (
     <div className="mx-auto max-w-7xl">
       <div className="flex flex-wrap justify-between gap-4 items-center mb-8">
-        <p className="text-text-light text-3xl font-bold leading-tight tracking-[-0.033em] min-w-72">Cycle Calendar</p>
+        <p className="text-text-light text-3xl font-bold leading-tight tracking-[-0.033em] min-w-72">
+          Cycle Calendar
+        </p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
@@ -224,14 +285,27 @@ export default function Calendar() {
           <div className="flex min-w-72 w-full flex-col gap-2">
             {/* Calendar Header */}
             <div className="flex items-center p-1 justify-between">
-              <button onClick={prevMonth} className="flex size-10 items-center justify-center rounded-full text-text-muted-light hover:bg-slate-100 transition-colors">
-                <span className="material-symbols-outlined text-lg text-text-light">chevron_left</span>
+              <button
+                onClick={prevMonth}
+                className="flex size-10 items-center justify-center rounded-full text-text-muted-light hover:bg-slate-100 transition-colors"
+              >
+                <span className="material-symbols-outlined text-lg text-text-light">
+                  chevron_left
+                </span>
               </button>
 
               <div className="flex items-center gap-4">
                 <select
                   value={currentDate.getMonth()}
-                  onChange={(e) => setCurrentDate(new Date(currentDate.getFullYear(), parseInt(e.target.value), 1))}
+                  onChange={(e) =>
+                    setCurrentDate(
+                      new Date(
+                        currentDate.getFullYear(),
+                        parseInt(e.target.value),
+                        1
+                      )
+                    )
+                  }
                   className="text-text-light text-lg font-bold leading-tight bg-transparent border-none focus:outline-none"
                 >
                   {monthNames.map((month, index) => (
@@ -243,10 +317,21 @@ export default function Calendar() {
 
                 <select
                   value={currentDate.getFullYear()}
-                  onChange={(e) => setCurrentDate(new Date(parseInt(e.target.value), currentDate.getMonth(), 1))}
+                  onChange={(e) =>
+                    setCurrentDate(
+                      new Date(
+                        parseInt(e.target.value),
+                        currentDate.getMonth(),
+                        1
+                      )
+                    )
+                  }
                   className="text-text-light text-lg font-bold leading-tight bg-transparent border-none focus:outline-none"
                 >
-                  {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map((year) => (
+                  {Array.from(
+                    { length: 10 },
+                    (_, i) => new Date().getFullYear() - 5 + i
+                  ).map((year) => (
                     <option key={year} value={year}>
                       {year}
                     </option>
@@ -254,8 +339,13 @@ export default function Calendar() {
                 </select>
               </div>
 
-              <button onClick={nextMonth} className="flex size-10 items-center justify-center rounded-full text-text-muted-light hover:bg-slate-100 transition-colors">
-                <span className="material-symbols-outlined text-lg text-text-light">chevron_right</span>
+              <button
+                onClick={nextMonth}
+                className="flex size-10 items-center justify-center rounded-full text-text-muted-light hover:bg-slate-100 transition-colors"
+              >
+                <span className="material-symbols-outlined text-lg text-text-light">
+                  chevron_right
+                </span>
               </button>
             </div>
 
@@ -263,19 +353,36 @@ export default function Calendar() {
             <div className="grid grid-cols-7 text-center">
               {/* Week Days */}
               {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-                <p key={day} className="text-text-muted-light text-xs font-bold leading-normal tracking-[0.015em] flex h-10 w-full items-center justify-center">
+                <p
+                  key={day}
+                  className="text-text-muted-light text-xs font-bold leading-normal tracking-[0.015em] flex h-10 w-full items-center justify-center"
+                >
                   {day}
                 </p>
               ))}
 
               {/* Calendar Days */}
               {calendarDays.map((dayInfo, index) => (
-                <button key={index} onClick={() => setSelectedDate(dayInfo.date)} className={`h-14 w-full text-sm font-medium leading-normal relative transition-all ${getDayClass(dayInfo)}`}>
+                <button
+                  key={index}
+                  onClick={() => setSelectedDate(dayInfo.date)}
+                  className={`h-14 w-full text-sm font-medium leading-normal relative transition-all ${getDayClass(
+                    dayInfo
+                  )}`}
+                >
                   <div className="flex size-full items-center justify-center rounded-lg flex-col">
                     <span>{dayInfo.day}</span>
-                    {dayInfo.ovulation && <div className="absolute bottom-1.5 h-1.5 w-1.5 rounded-full bg-ovulation"></div>}
-                    {dayInfo.hasLogData && <div className="absolute top-1.5 h-1.5 w-1.5 rounded-full bg-green-500"></div>}
-                    {!dayInfo.isCurrentMonth && <span className="text-xs text-gray-400">{dayInfo.date.getMonth() + 1}</span>}
+                    {dayInfo.ovulation && (
+                      <div className="absolute bottom-1.5 h-1.5 w-1.5 rounded-full bg-ovulation"></div>
+                    )}
+                    {dayInfo.hasLogData && (
+                      <div className="absolute top-1.5 h-1.5 w-1.5 rounded-full bg-green-500"></div>
+                    )}
+                    {!dayInfo.isCurrentMonth && (
+                      <span className="text-xs text-gray-400">
+                        {dayInfo.date.getMonth() + 1}
+                      </span>
+                    )}
                   </div>
                 </button>
               ))}
@@ -285,19 +392,27 @@ export default function Calendar() {
             <div className="mt-6 border-t border-border-light pt-4 flex flex-wrap gap-x-6 gap-y-3">
               <div className="flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full bg-period"></div>
-                <span className="text-xs font-medium text-text-muted-light">Period</span>
+                <span className="text-xs font-medium text-text-muted-light">
+                  Period
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full bg-fertile/50"></div>
-                <span className="text-xs font-medium text-text-muted-light">Fertile Window</span>
+                <span className="text-xs font-medium text-text-muted-light">
+                  Fertile Window
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full bg-ovulation"></div>
-                <span className="text-xs font-medium text-text-muted-light">Ovulation</span>
+                <span className="text-xs font-medium text-text-muted-light">
+                  Ovulation
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full bg-green-500"></div>
-                <span className="text-xs font-medium text-text-muted-light">Has Log</span>
+                <span className="text-xs font-medium text-text-muted-light">
+                  Has Log
+                </span>
               </div>
             </div>
           </div>
@@ -317,17 +432,23 @@ export default function Calendar() {
 
             {/* Symptoms */}
             <div className="flex flex-col gap-3">
-              <label className="text-sm font-bold text-text-light">Symptoms</label>
+              <label className="text-sm font-bold text-text-light">
+                Symptoms
+              </label>
               <div className="flex flex-wrap gap-2">
                 {symptomOptions.map((symptom) => (
                   <button
                     key={symptom.id}
                     onClick={() => toggleSymptom(symptom.id)}
                     className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                      symptoms.includes(symptom.id) ? "bg-primary text-white" : "border border-border-light hover:bg-slate-100 bg-card-light text-text-muted-light"
+                      symptoms.includes(symptom.id)
+                        ? "bg-primary text-white"
+                        : "border border-border-light hover:bg-slate-100 bg-card-light text-text-muted-light"
                     }`}
                   >
-                    <span className="material-symbols-outlined text-base">{symptom.icon}</span>
+                    <span className="material-symbols-outlined text-base">
+                      {symptom.icon}
+                    </span>
                     {symptom.label}
                   </button>
                 ))}
@@ -343,7 +464,9 @@ export default function Calendar() {
                     key={moodOption.id}
                     onClick={() => setMood(moodOption.id)}
                     className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                      mood === moodOption.id ? "bg-primary text-white" : "border border-border-light hover:bg-slate-100 bg-card-light text-text-muted-light"
+                      mood === moodOption.id
+                        ? "bg-primary text-white"
+                        : "border border-border-light hover:bg-slate-100 bg-card-light text-text-muted-light"
                     }`}
                   >
                     {moodOption.emoji} {moodOption.label}
@@ -358,13 +481,15 @@ export default function Calendar() {
               <div className="grid grid-cols-3 gap-2">
                 {flowOptions.map((flowOption) => (
                   <button
-                    key={flowOption}
-                    onClick={() => setFlow(flowOption)}
+                    key={flowOption.label}
+                    onClick={() => setFlow(flowOption.value)}
                     className={`flex items-center justify-center rounded-lg px-4 py-1.5 text-sm transition-colors ${
-                      flow === flowOption ? "bg-primary text-white" : "border border-border-light hover:bg-slate-100 bg-card-light text-text-muted-light"
+                      flow === flowOption.value
+                        ? "bg-primary text-white"
+                        : "border border-border-light hover:bg-slate-100 bg-card-light text-text-muted-light"
                     }`}
                   >
-                    {flowOption}
+                    {flowOption.label}
                   </button>
                 ))}
               </div>
@@ -372,7 +497,10 @@ export default function Calendar() {
 
             {/* Notes */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-text-light" htmlFor="notes">
+              <label
+                className="text-sm font-bold text-text-light"
+                htmlFor="notes"
+              >
                 Notes
               </label>
               <textarea
